@@ -1,5 +1,9 @@
 import json
 from flask import Flask, request
+from functools import wraps
+
+from core.log.logger import Error
+from interface.integration.methods import ProfileDec
 
 class FlaskApi:
     template = None
@@ -15,16 +19,12 @@ class FlaskApi:
         def home():
             return "Ok.!", 200
 
-        @self.api.route('/register', methods=["POST"])
-        def register():
-            return self.template.register_user(request.form)
+        @self.api.route('/user/register', methods=["POST"])
+        def user_register():
+            return self.template.user_register(request.form)
 
-        @self.api.route('/profile', methods=["POST"])
-        def profile():
-            try:
-                # result = self.template.profile("request.headers['Authorization']")
-                print (self.template.profile('hola'))
-                return ("bad", 401)
-            except Exception as e:
-                print (e)
-                return ("Error", 401)
+        @self.api.route('/user/login', methods=["POST"])
+        def user_login():
+            return self.template.user_login(request.form)
+        
+

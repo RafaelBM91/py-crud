@@ -10,7 +10,7 @@ def ConnectDB(method):
     return function
 
 @ConnectDB
-def register_user(cursor, params):
+def user_register(cursor, params):
     try:
         id = uuid.uuid1().__str__()
         cursor.execute('''
@@ -31,3 +31,19 @@ def register_user(cursor, params):
     finally:
         cursor.close()
 
+@ConnectDB
+def user_login(cursor, params):
+    try:
+        result = cursor.execute('''
+            SELECT id FROM User WHERE email='{}' AND password='{}' LIMIT 1
+        '''.format(
+                params['email'],
+                params['password']
+            )
+        ).fetchone()
+        return result[0] if result != None else None
+    except Exception as e:
+        print ('[Error ~> sql.users]: ', e)
+        return None
+    finally:
+        cursor.close()
