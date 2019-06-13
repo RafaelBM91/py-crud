@@ -1,113 +1,160 @@
-# models
-
+import json
+from functools import wraps
 from marshmallow import (
     Schema,
     fields,
     ValidationError
 )
+from flask import (
+    Flask,
+    request
+)
+from sqlite3 import connect
+import uuid
 
 class User(Schema):
-    dni      = fields.Str(required=True)
-    email    = fields.Str(required=True)
-    name     = fields.Str(required=True)
-    password = fields.Str(required=True)
+    email     = fields.Str(required=True)
+    name      = fields.Str(required=True)
+    password  = fields.Str(required=True)
 
-# api
+class UserLogin(Schema):
+    email     = fields.Str(required=True)
+    password  = fields.Str(required=True)
 
-import json
-from flask import Flask, request
+def ParseModel(Model):
+    def decorator(method):
+        @wraps(method)
+        def parser(*args, **kargs):
+            destruct = list(args)
+            destruct[1] = Model().load(destruct[1])
+            return method(*tuple(destruct), **kargs)
+        return parser
+    return decorator
 
-class Api:
-    template = None
-
-    def __init__(self, template):
-        self.template = template
-        self.api = Flask(__name__)
-        self.__load_routes()
-
-    def __load_routes(self):
-        
-        @self.api.route('/', methods=["GET"])
-        def home():
-            return "Ok.!", 200
-
-        @self.api.route('/register', methods=["POST"])
-        def register():
-            return self.template.register_user(request.form)
-
-# database
-
-from functools import wraps
-
-from pymongo import (
-    MongoClient,
-    TEXT
-)
-
-def prepare_database(database, collection):
-    client = MongoClient('mongodb://localhost:27017/')
-    db = client[database]
-    try:
-        collection = db.create_collection(collection)
-        collection.create_index([('dni', TEXT)], unique = True)
-    except Exception as ex:
-        print (ex)
-
-def connection(method):
+def ConnectionDB(method):
     @wraps(method)
-    def wrap_method(*args, **kwargs):
-        client = MongoClient('mongodb://localhost:27017/')
-        aux_args = list(args)
-        aux_args[0] = client
-        new_args = tuple(aux_args)
-        return method(*new_args, **kwargs)
-    return wrap_method
+    def conn(*args, **kargs):
+        destruct = list(args)
+        destruct.append(connect('database.db'))
+        return method(*tuple(destruct), **kargs)
+    return conn
 
-@connection
-def find_one_user(client, options):
-    return client.python.users.find_one(options)
+class DataBase:
 
-@connection
-def insert_one_user(client, options):
-    return client.python.users.insert_one(options)
+    @ConnectionDB
+    def __init__(self, cursor = None):
+        cursor.execute('''CREATE TABLE IF NOT EXISTS User (
+            id text  PRIMARY KEY,
+            email text NOT NULL UNIQUE,
+            name text NOT NULL,
+            password text NOT NULL
+        )''')
+        cursor.commit()
+        cursor.close()
 
-# interface
-
-##declare module { models }
-
-class Interface:
-    api = None
-    template = {}
-
-    def __init__(self):
-        self.api = Api(self)
-        self.api.api.run(port = 9090)
-
-    def register_user(self, user = None):
+    @ConnectionDB
+    def user_register(self, values, cursor = None):
+        if values.errors != {}:
+            raise Exception(values.errors)
         try:
-            new_user = User().load(user)
-            if new_user.errors.__len__() > 0:
-                return ("Bad Request", 400)
-            return ("Ok.!", 200)
-        except ValidationError as er:
-            print (er)
-            return ("Bad Request", 400)
-
-# app
-
-class App:
-
-    def start_app(self):
-        prepare_database('python', 'users')
-        print (find_one_user(None, { 'name': 'rafael' }))
-
-        try:
-            print (insert_one_user(None, { 'dni': '001577503', 'password': '123456', 'email': 'ts@ts.ts', 'name': 'rafael' }))
+            id = uuid.uuid1().__str__()
+            cursor.execute('''
+                INSERT INTO User
+                    (id, email, name, password)
+                VALUES ('{}', '{}', '{}', '{}')'''.format(
+                    id,
+                    values.data['email'],
+                    values.data['name'],
+                    values.data['password']
+                )
+            )
+            cursor.commit()
         except Exception as e:
-            print (e)
+            raise Exception(e)
+        finally:
+            cursor.close()
+        return ({'id': id})
 
-        self.interface = Interface()
+    @ConnectionDB
+    def user_login(self, values, cursor = None):
+        if values.errors != {}:
+            raise Exception(values.errors)
+        try:
+            result = cursor.execute('''SELECT id FROM User 
+                WHERE email='{}' AND password='{}' LIMIT 1
+            '''.format(
+                    values.data['email'],
+                    values.data['password']
+                )
+            ).fetchone()
+            result = result[0] if result != None else None
+        except Exception as e:
+            raise Exception(e)
+        finally:
+            cursor.close()
+        return result
 
-# main
-if __name__ == "__main__":
-    App().start_app()
+def Operations(method):
+    @wraps(method)
+    def fn(*args, **kargs):
+        destruct = list(args)
+        fnCall = None
+        fnCall = getattr(DataBase, method.__name__)
+        try:
+            destruct.append(
+                fnCall(None, destruct[1])
+            )
+        except Exception as e:
+            destruct.extend((e.__str__(), True))
+        return method(*tuple(destruct), **kargs)
+    return fn
+
+class Mutation:
+    
+    @ParseModel(User)
+    @Operations
+    def user_register(self, values, result = None, errors = False):
+        if errors:
+            return self.format({}, '[Error]', result, 400)
+        else:
+            return self.format(result, '[Ok]', '', 200)
+
+    @ParseModel(UserLogin)
+    @Operations
+    def user_login(self, values, result = None, errors = False):
+        if result == None:
+            return self.format({}, '[Access Denied]', {}, 401)
+        else: 
+            if errors:
+                return self.format({}, '[Error]', result, 401)
+            else:
+                
+                return self.format({'id': result}, '[Ok]', '', 200)
+
+    def format(self, data, msg, error, code):
+        return json.dumps({
+            'data' : data,
+            'msg'  : msg,
+            'error': error
+        }), code
+
+def FlastApi():
+    app = Flask(__name__)
+    mutation = Mutation()
+    
+    @app.route('/user/register', methods=['POST'])
+    def user_register():
+        return mutation.user_register(request.form)
+
+    @app.route('/user/login', methods=['POST'])
+    def user_login():
+        return mutation.user_login(request.form)
+
+    app.run(port=1212)
+
+def main():
+    DataBase()
+    FlastApi()
+
+if __name__ == '__main__':
+    main()
