@@ -11,6 +11,33 @@ from flask import (
 )
 from sqlite3 import connect
 import uuid
+from jwt import (
+    encode,
+    decode
+)
+from datetime import (
+    datetime,
+    timedelta
+)
+
+def AuthEncode(user_id):
+    exp = (datetime.utcnow() + timedelta(minutes=60))
+    token = encode({ 'id': user_id, 'exp': exp }, 'secrect', algorithm='HS256')
+    return token
+
+def AuthDecode(method):
+    @wraps(method)
+    def decode_fn(*args, **kargs):
+        destruct = list(args)
+        try:
+            token = destruct[1].encode()
+            decoded = decode(token, 'secrect', algorithms=['HS256'])
+            destruct[1] = decoded['id']
+        except Exception as e:
+            print (e)
+            destruct.extend((None, True))
+        return method(*tuple(destruct), **kargs)
+    return decode_fn
 
 class User(Schema):
     email     = fields.Str(required=True)
@@ -77,6 +104,7 @@ class DataBase:
 
     @ConnectionDB
     def user_login(self, values, cursor = None):
+        print (self)
         if values.errors != {}:
             raise Exception(values.errors)
         try:
@@ -87,12 +115,43 @@ class DataBase:
                     values.data['password']
                 )
             ).fetchone()
-            result = result[0] if result != None else None
+            result = AuthEncode(result[0]).decode("utf-8")  if result != None else None
         except Exception as e:
             raise Exception(e)
         finally:
             cursor.close()
         return result
+
+    def user_profile(self, user_id):
+        print ()
+ 
+        # print ('shi', user_id)
+
+        # try:
+        #     self.user_login(user_id)
+        # except Exception as e:
+        #     print (self)
+
+        return None
+
+    # @ConnectionDB
+    def user_by_id(self, values, cursor = None):
+        print ('jijiji', values)
+        # try:
+        #     result = cursor.execute('''SELECT name, email FROM User 
+        #             WHERE id='{}' LIMIT 1
+        #         '''.format(
+        #             values
+        #         )
+        #     ).fetchone()
+        #     print (result)
+        #     result = None
+        # # AuthEncode(result[0]).decode("utf-8")  if result != None else None
+        # except Exception as e:
+        #     raise Exception(e)
+        # finally:
+        # cursor.close()
+        return None
 
 def Operations(method):
     @wraps(method)
@@ -100,12 +159,18 @@ def Operations(method):
         destruct = list(args)
         fnCall = None
         fnCall = getattr(DataBase, method.__name__)
+        if destruct.__len__() == 2:
+            destruct.extend((None, False))
+        if destruct.__len__() == 3:
+            destruct.append(False)
         try:
-            destruct.append(
-                fnCall(None, destruct[1])
-            )
+            if destruct[3] == False:
+                destruct[2] = fnCall(None, destruct[1])
+            else:
+                raise Exception()
         except Exception as e:
-            destruct.extend((e.__str__(), True))
+            destruct[2] = e.__str__()
+            destruct[3] = True
         return method(*tuple(destruct), **kargs)
     return fn
 
@@ -129,7 +194,16 @@ class Mutation:
                 return self.format({}, '[Error]', result, 401)
             else:
                 
-                return self.format({'id': result}, '[Ok]', '', 200)
+                return self.format({'token': result}, '[Ok]', '', 200)
+
+    @AuthDecode
+    @Operations
+    def user_profile(self, values, result = None, errors = False):
+        if errors:
+            return self.format({}, '[Unauthorized]', '', 401)
+        
+        # print (result, errors)
+        return self.format({}, '[Ok]', '', 200)
 
     def format(self, data, msg, error, code):
         return json.dumps({
@@ -149,6 +223,10 @@ def FlastApi():
     @app.route('/user/login', methods=['POST'])
     def user_login():
         return mutation.user_login(request.form)
+
+    @app.route('/user/profile', methods=['POST'])
+    def user_profile():
+        return mutation.user_profile(request.headers.get('Authorization'))
 
     app.run(port=1212)
 
