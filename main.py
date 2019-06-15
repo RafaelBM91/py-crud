@@ -1,9 +1,9 @@
-from interface.rest.api.api import Interface
-
-import adapter.sql.user 
+from interface.rest.server import Server
+from adapter.sql.database import DataBase
 
 def App():
-    Interface()
+    DataBase()
+    Server()
 
 if __name__ == "__main__":
     App()

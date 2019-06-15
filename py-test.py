@@ -104,7 +104,6 @@ class DataBase:
 
     @ConnectionDB
     def user_login(self, values, cursor = None):
-        print (self)
         if values.errors != {}:
             raise Exception(values.errors)
         try:
@@ -123,49 +122,35 @@ class DataBase:
         return result
 
     def user_profile(self, user_id):
-        print ()
- 
-        # print ('shi', user_id)
+        return self.user_by_id(self, user_id)
 
-        # try:
-        #     self.user_login(user_id)
-        # except Exception as e:
-        #     print (self)
-
-        return None
-
-    # @ConnectionDB
+    @ConnectionDB
     def user_by_id(self, values, cursor = None):
-        print ('jijiji', values)
-        # try:
-        #     result = cursor.execute('''SELECT name, email FROM User 
-        #             WHERE id='{}' LIMIT 1
-        #         '''.format(
-        #             values
-        #         )
-        #     ).fetchone()
-        #     print (result)
-        #     result = None
-        # # AuthEncode(result[0]).decode("utf-8")  if result != None else None
-        # except Exception as e:
-        #     raise Exception(e)
-        # finally:
-        # cursor.close()
-        return None
+        try:
+            result = cursor.execute('''
+                SELECT name, email FROM User WHERE id='{}' LIMIT 1
+            '''.format(values)
+            ).fetchone()
+            AuthEncode(result[0]).decode("utf-8")  if result != None else None
+        except Exception as e:
+            raise Exception(e)
+        finally:
+            cursor.close()
+        return result
 
 def Operations(method):
     @wraps(method)
     def fn(*args, **kargs):
         destruct = list(args)
-        fnCall = None
-        fnCall = getattr(DataBase, method.__name__)
+        classdb = DataBase
+        fnCall = getattr(classdb, method.__name__)
         if destruct.__len__() == 2:
             destruct.extend((None, False))
         if destruct.__len__() == 3:
             destruct.append(False)
         try:
             if destruct[3] == False:
-                destruct[2] = fnCall(None, destruct[1])
+                destruct[2] = fnCall(classdb, destruct[1])
             else:
                 raise Exception()
         except Exception as e:
@@ -174,7 +159,7 @@ def Operations(method):
         return method(*tuple(destruct), **kargs)
     return fn
 
-class Mutation:
+class Api:
     
     @ParseModel(User)
     @Operations
@@ -201,9 +186,10 @@ class Mutation:
     def user_profile(self, values, result = None, errors = False):
         if errors:
             return self.format({}, '[Unauthorized]', '', 401)
-        
-        # print (result, errors)
-        return self.format({}, '[Ok]', '', 200)
+        return self.format({
+            'name' : result[0],
+            'email': result[1]
+        }, '[Ok]', '', 200)
 
     def format(self, data, msg, error, code):
         return json.dumps({
@@ -214,19 +200,19 @@ class Mutation:
 
 def FlastApi():
     app = Flask(__name__)
-    mutation = Mutation()
+    api = Api()
     
     @app.route('/user/register', methods=['POST'])
     def user_register():
-        return mutation.user_register(request.form)
+        return api.user_register(request.form)
 
     @app.route('/user/login', methods=['POST'])
     def user_login():
-        return mutation.user_login(request.form)
+        return api.user_login(request.form)
 
     @app.route('/user/profile', methods=['POST'])
     def user_profile():
-        return mutation.user_profile(request.headers.get('Authorization'))
+        return api.user_profile(request.headers.get('Authorization'))
 
     app.run(port=1212)
 
